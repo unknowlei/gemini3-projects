@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>贪吃蛇大作战 - 悦动版</title>
+    <title>贪吃蛇大作战 - 横屏漂移版</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
             background-color: #151515;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            touch-action: none; /* 禁止浏览器默认触摸行为 */
+            touch-action: none; /* 禁用所有默认触摸 */
             user-select: none;
             -webkit-user-select: none;
         }
@@ -93,9 +93,36 @@
             backdrop-filter: blur(5px);
             pointer-events: none;
         }
+
+        /* 横屏提示遮罩 */
+        #rotate-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            display: none; /* 默认隐藏 */
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            font-size: 20px;
+            z-index: 9999;
+        }
+        
+        /* 媒体查询：当屏幕处于竖屏时显示遮罩 */
+        @media (orientation: portrait) {
+            #rotate-overlay {
+                display: flex;
+            }
+        }
     </style>
 </head>
 <body>
+
+    <!-- 横屏提示 -->
+    <div id="rotate-overlay">
+        <p>📱<br><br>为了最好的游戏体验<br>请将手机旋转至横屏模式</p>
+    </div>
 
     <div id="ui-layer">
         <div id="top-bar">
@@ -118,23 +145,15 @@
     <canvas id="gameCanvas"></canvas>
 
     <script>
-        // --- 游戏核心配置 (V12 - 新手友好 & 音乐版) ---
+        // --- 游戏核心配置 (V13 - 横屏漂移) ---
         const config = {
             worldSize: 3200,
-            
-            // --- 速度物理系统 (进一步降速，更易上手) ---
-            // 基础：Length=10 (小蛇)
-            maxBaseSpeed: 2.2,   // 从 2.55 降至 2.2
-            maxBoostSpeed: 4.2,  // 从 5.5 降至 4.2 (大幅降低极速，防止不可控)
-            
-            // 下限：Length=MAX (巨蛇)
+            maxBaseSpeed: 2.2,
+            maxBoostSpeed: 4.2,
             minBaseSpeed: 1.4,   
             minBoostSpeed: 2.8, 
-            
-            // 速度衰减：每增加1点长度，速度减少多少
-            speedDecay: 0.006, // 衰减稍微平缓一点
-
-            turnSpeed: 0.08,
+            speedDecay: 0.006, 
+            turnSpeed: 0.08, // 漂移时转弯要慢一点，更有手感
             segmentDist: 6,
             baseRadius: 10,
             initialLength: 10,
@@ -147,85 +166,39 @@
             ]
         };
 
-        // --- 音乐系统 (Web Audio API) ---
+        // --- 音乐系统 ---
         const AudioSys = {
-            ctx: null,
-            isPlaying: false,
-            nextNoteTime: 0,
-            noteIndex: 0,
-            // 简单的C大调五声音阶旋律，轻松惬意
-            melody: [
-                261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 
-                392.00, 329.63, 293.66, 329.63, 261.63, 
-                196.00, 220.00, 261.63
-            ],
-            // 节奏 (秒)
-            rhythm: [
-                0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 
-                0.5, 0.5, 0.5, 0.5, 1.0,
-                0.5, 0.5, 2.0
-            ],
-
-            init: function() {
-                if (!this.ctx) {
-                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-                }
-            },
-
+            ctx: null, isPlaying: false, nextNoteTime: 0, noteIndex: 0,
+            melody: [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 392.00, 329.63, 293.66, 329.63, 261.63, 196.00, 220.00, 261.63],
+            rhythm: [0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 2.0],
+            init: function() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
             playNote: function(freq, duration) {
                 if (!this.ctx) return;
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
-                
-                osc.type = 'sine'; // 柔和的正弦波
-                osc.frequency.value = freq;
-                
-                osc.connect(gain);
+                const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+                osc.type = 'sine'; osc.frequency.value = freq; osc.connect(gain);
                 gain.connect(this.ctx.destination);
-                
-                // 音量包络：淡入淡出
                 gain.gain.setValueAtTime(0, this.ctx.currentTime);
                 gain.gain.linearRampToValueAtTime(0.1, this.ctx.currentTime + 0.05);
                 gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
-
-                osc.start();
-                osc.stop(this.ctx.currentTime + duration);
+                osc.start(); osc.stop(this.ctx.currentTime + duration);
             },
-
             update: function() {
                 if (!this.isPlaying || !this.ctx) return;
-                
-                // 简单的调度器
                 if (this.ctx.currentTime >= this.nextNoteTime) {
-                    const freq = this.melody[this.noteIndex];
-                    const dur = this.rhythm[this.noteIndex];
-                    
-                    // 稍微加入一点随机性，让它不那么机械
+                    const freq = this.melody[this.noteIndex]; const dur = this.rhythm[this.noteIndex];
                     this.playNote(freq, dur);
-                    
                     this.nextNoteTime = this.ctx.currentTime + dur;
                     this.noteIndex = (this.noteIndex + 1) % this.melody.length;
                 }
             },
-
             toggle: function() {
-                this.init();
-                if (this.ctx.state === 'suspended') {
-                    this.ctx.resume();
-                }
+                this.init(); if (this.ctx.state === 'suspended') this.ctx.resume();
                 this.isPlaying = !this.isPlaying;
-                const btn = document.getElementById('music-btn');
-                btn.innerText = this.isPlaying ? "🎵 暂停音乐" : "🎵 开启音乐";
-                if (this.isPlaying) {
-                    this.nextNoteTime = this.ctx.currentTime;
-                    this.noteIndex = 0;
-                }
+                document.getElementById('music-btn').innerText = this.isPlaying ? "🎵 暂停音乐" : "🎵 开启音乐";
+                if (this.isPlaying) { this.nextNoteTime = this.ctx.currentTime; this.noteIndex = 0; }
             }
         };
-
-        function toggleMusic() {
-            AudioSys.toggle();
-        }
+        function toggleMusic() { AudioSys.toggle(); }
 
         // --- 全局变量 ---
         const canvas = document.getElementById('gameCanvas');
@@ -235,100 +208,69 @@
         
         let width, height;
         let camera = { x: 0, y: 0 };
-        let mouse = { x: 0, y: 0 }; // 依然用于PC鼠标坐标
+        let mouse = { x: 0, y: 0 }; 
         let isBoosting = false;
         let gameState = 'playing';
-        
-        // 虚拟摇杆状态
+        let isTouchDevice = ('ontouchstart' in window);
+
         let joystick = {
             active: false,
-            originX: 0,
-            originY: 0,
-            currentX: 0,
-            currentY: 0,
-            radius: 60, // 摇杆最大半径
-            angle: 0    // 输出角度
+            id: null, // 跟踪是哪一根手指在操控
+            originX: 0, originY: 0,
+            currentX: 0, currentY: 0,
+            radius: 70, // 摇杆视觉半径
+            angle: 0    
         };
         
         let player;
         let bots = [];
         let foods = [];
 
-        // --- 工具函数 ---
         const rand = (min, max) => Math.random() * (max - min) + min;
         const dist = (x1, y1, x2, y2) => Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
         const randomColor = () => config.colors[Math.floor(Math.random() * config.colors.length)];
 
-        // --- 类定义 ---
+        // --- 类定义 (Food, Snake) ---
         class Food {
             constructor(x, y, value = 1, color = null, isDeadBody = false) {
                 const boundary = config.worldSize / 2 - 20;
                 this.x = x !== undefined ? x : rand(-boundary, boundary);
                 this.y = y !== undefined ? y : rand(-boundary, boundary);
-                this.value = value; 
-                this.radius = isDeadBody ? rand(3, 6) : rand(2, 3.5); 
+                this.value = value; this.radius = isDeadBody ? rand(3, 6) : rand(2, 3.5); 
                 this.color = color || `hsl(${rand(0, 360)}, 80%, 60%)`;
-                this.floatOffset = rand(0, Math.PI * 2);
-                this.glowing = isDeadBody; 
+                this.floatOffset = rand(0, Math.PI * 2); this.glowing = isDeadBody; 
             }
-
             draw(ctx) {
                 this.floatOffset += 0.04;
                 const scale = 1 + Math.sin(this.floatOffset) * 0.12;
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                ctx.scale(scale, scale);
-                ctx.beginPath();
-                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.save(); ctx.translate(this.x, this.y); ctx.scale(scale, scale);
+                ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
                 ctx.fillStyle = this.color;
-                if (this.glowing) {
-                    ctx.shadowColor = this.color;
-                    ctx.shadowBlur = 8;
-                }
-                ctx.fill();
-                ctx.restore();
+                if (this.glowing) { ctx.shadowColor = this.color; ctx.shadowBlur = 8; }
+                ctx.fill(); ctx.restore();
             }
         }
 
         class Snake {
             constructor(x, y, isBot = false) {
-                this.isBot = isBot;
-                this.x = x;
-                this.y = y;
-                this.angle = rand(0, Math.PI * 2);
-                this.targetAngle = this.angle;
-                
-                this.currentSpeed = config.maxBaseSpeed;
-                this.currentBaseSpeed = config.maxBaseSpeed;
+                this.isBot = isBot; this.x = x; this.y = y;
+                this.angle = rand(0, Math.PI * 2); this.targetAngle = this.angle;
+                this.currentSpeed = config.maxBaseSpeed; this.currentBaseSpeed = config.maxBaseSpeed;
                 this.currentBoostSpeed = config.maxBoostSpeed;
-
-                this.botSpeedMultiplier = isBot ? rand(0.8, 0.9) : 1.0; // AI略慢
-
-                this.radius = config.baseRadius;
-                this.color = isBot ? randomColor() : '#54a0ff'; 
+                this.botSpeedMultiplier = isBot ? rand(0.75, 0.85) : 1.0;
+                this.radius = config.baseRadius; this.color = isBot ? randomColor() : '#54a0ff'; 
                 this.headColor = isBot ? this.color : '#2e86de';
-                
-                this.length = config.initialLength; 
-                this.path = []; 
-                for(let i=0; i<this.length * 3; i++) {
-                    this.path.push({x: x, y: y});
-                }
-
-                this.growQueue = 0;
-                this.dead = false;
-
+                this.length = config.initialLength; this.path = []; 
+                for(let i=0; i<this.length * 3; i++) this.path.push({x: x, y: y});
+                this.growQueue = 0; this.dead = false;
                 if (this.isBot) {
                     const r = Math.random();
                     if (r < 0.3) this.personality = 'aggressive'; 
                     else if (r < 0.6) this.personality = 'cautious'; 
                     else this.personality = 'normal'; 
                 }
-                
-                this.aiTimer = 0;
-                this.panicLevel = 0;
-                this.burstTimer = 0;
-                this.burstLimit = 0;
-                this.fatigueTimer = 0;
+                this.aiTimer = 0; this.panicLevel = 0; this.burstTimer = 0;
+                this.burstLimit = 0; this.fatigueTimer = 0;
             }
 
             updateSpeedStats() {
@@ -348,16 +290,21 @@
                     this.handleBotAI();
                 }
 
-                // 平滑转向
+                // **核心修改：转向速度**
+                // 漂移时(摇杆未激活)转弯应该更慢，更有惯性
+                let turnSpeed = config.turnSpeed;
+                if (isTouchDevice && !joystick.active) {
+                    turnSpeed *= 0.5; // 惯性漂移时，转向响应变慢
+                }
+
                 let diff = this.targetAngle - this.angle;
                 while (diff < -Math.PI) diff += Math.PI * 2;
                 while (diff > Math.PI) diff -= Math.PI * 2;
-                this.angle += diff * config.turnSpeed;
+                this.angle += diff * turnSpeed;
 
                 this.x += Math.cos(this.angle) * this.currentSpeed;
                 this.y += Math.sin(this.angle) * this.currentSpeed;
 
-                // 边界检测
                 const limit = config.worldSize / 2;
                 if (!this.isBot) {
                     if (Math.abs(this.x) > limit - this.radius || Math.abs(this.y) > limit - this.radius) {
@@ -365,35 +312,29 @@
                         triggerGameOver("冲出了世界");
                         return;
                     }
-                } else {
-                    if (Math.abs(this.x) > limit || Math.abs(this.y) > limit) {
-                        this.dead = true; 
-                    }
-                }
+                } else { if (Math.abs(this.x) > limit || Math.abs(this.y) > limit) this.dead = true; }
 
                 this.path.unshift({x: this.x, y: this.y});
-                if (this.growQueue > 0) {
-                    this.length += 0.1; 
-                    this.growQueue -= 0.1;
-                }
+                if (this.growQueue > 0) { this.length += 0.1; this.growQueue -= 0.1; }
                 
                 const neededPoints = (this.length * config.segmentDist) / (config.minBaseSpeed * 0.5) + 150;
-                while (this.path.length > neededPoints) {
-                    this.path.pop();
-                }
+                while (this.path.length > neededPoints) this.path.pop();
             }
 
+            // **核心修改：玩家输入 (漂移)**
             handlePlayerInput() {
                 if (joystick.active) {
-                    // 使用虚拟摇杆角度
+                    // 移动端：摇杆激活时，才更新目标角度
                     this.targetAngle = joystick.angle;
-                } else {
-                    // 使用鼠标
+                } else if (!isTouchDevice) {
+                    // PC端：永远跟随鼠标
                     const worldMouseX = mouse.x + camera.x - width/2;
                     const worldMouseY = mouse.y + camera.y - height/2;
                     this.targetAngle = Math.atan2(worldMouseY - this.y, worldMouseX - this.x);
                 }
-                
+                // 在移动端，如果 joystick.active == false，targetAngle 不会更新
+                // 蛇会继续朝上一个 targetAngle 移动，实现漂移
+
                 if (isBoosting && this.length > config.initialLength) {
                     this.currentSpeed = this.currentBoostSpeed;
                     if (Math.random() < config.boostCostRate) {
@@ -405,57 +346,42 @@
                 }
             }
 
+            // --- AI 逻辑 (保持不变) ---
             handleBotAI() {
                 let isFatigued = false;
                 if (this.fatigueTimer > 0) {
-                    this.fatigueTimer--;
-                    isFatigued = true;
-                    this.burstTimer = 0; 
+                    this.fatigueTimer--; isFatigued = true; this.burstTimer = 0; 
                 }
-                
                 let detectionDist = 80 + (this.currentSpeed * 15); 
                 if (this.personality === 'cautious') detectionDist += 50;
-
                 let danger = this.detectDanger(detectionDist);
                 if (danger && danger.dist < 60) this.panicLevel = Math.min(this.panicLevel + 10, 100);
                 else this.panicLevel = Math.max(this.panicLevel - 2, 0);
-
                 let wantsToBoost = false;
-
                 if (danger) {
                     let canAttack = false;
                     if (this.length > config.initialLength && !isFatigued && this.personality === 'aggressive' && this.panicLevel < 80) {
                         if (!danger.isSelf && !danger.isWall) {
                             let angleDiff = this.normalizeAngle(danger.angle - this.angle);
-                            if (Math.abs(angleDiff) < Math.PI / 1.5 && Math.abs(angleDiff) > 0.3) {
-                                canAttack = true;
-                            }
+                            if (Math.abs(angleDiff) < Math.PI / 1.5 && Math.abs(angleDiff) > 0.3) canAttack = true;
                         }
                     }
-
                     if (canAttack) {
                         let attackAngle = danger.angle + (this.normalizeAngle(danger.angle - this.angle) > 0 ? 0.6 : -0.6);
                         if (this.isDirectionSafe(attackAngle, detectionDist * 0.8)) {
-                            this.targetAngle = attackAngle;
-                            wantsToBoost = true;
-                        } else {
-                            this.performDodge(danger);
-                        }
+                            this.targetAngle = attackAngle; wantsToBoost = true;
+                        } else { this.performDodge(danger); }
                     } else {
                         this.performDodge(danger);
-                        if (this.personality === 'cautious' || this.panicLevel > 50) {
-                             wantsToBoost = true;
-                        }
+                        if (this.personality === 'cautious' || this.panicLevel > 50) wantsToBoost = true;
                     }
                 } else {
-                    const limit = config.worldSize / 2;
-                    const safeMargin = 150; 
+                    const limit = config.worldSize / 2; const safeMargin = 150; 
                     let nearWall = false;
                     if (this.x < -limit + safeMargin) { this.targetAngle = 0; nearWall = true; } 
                     else if (this.x > limit - safeMargin) { this.targetAngle = Math.PI; nearWall = true; } 
                     else if (this.y < -limit + safeMargin) { this.targetAngle = Math.PI/2; nearWall = true; } 
                     else if (this.y > limit - safeMargin) { this.targetAngle = -Math.PI/2; nearWall = true; } 
-
                     if (!nearWall) {
                         this.aiTimer--;
                         if (this.aiTimer <= 0) {
@@ -469,45 +395,30 @@
                                 let randomAngle = this.angle + rand(-1, 1);
                                 if (this.isDirectionSafe(randomAngle, detectionDist)) this.targetAngle = randomAngle;
                             }
-                            
                             if (this.length > config.initialLength + 10 && !isFatigued && this.personality !== 'cautious' && Math.random() < 0.02) {
                                 if (this.isDirectionSafe(this.targetAngle, detectionDist * 1.5)) wantsToBoost = true;
                             }
                         }
-                    } else {
-                        wantsToBoost = false;
-                    }
+                    } else { wantsToBoost = false; }
                 }
-
                 if (wantsToBoost && !isFatigued && this.length > config.initialLength) {
                     if (this.burstTimer === 0) {
                         this.burstLimit = rand(30, 150); 
                         if (this.personality === 'aggressive') this.burstLimit += 50;
                     }
-                    this.currentSpeed = this.currentBoostSpeed;
-                    this.consumeEnergy();
+                    this.currentSpeed = this.currentBoostSpeed; this.consumeEnergy();
                     this.burstTimer++;
                     if (this.burstTimer >= this.burstLimit) {
-                        this.fatigueTimer = rand(60, 180);
-                        this.burstTimer = 0;
+                        this.fatigueTimer = rand(60, 180); this.burstTimer = 0;
                         this.currentSpeed = this.currentBaseSpeed;
                     }
-                } else {
-                    this.currentSpeed = this.currentBaseSpeed;
-                    this.burstTimer = 0;
-                }
+                } else { this.currentSpeed = this.currentBaseSpeed; this.burstTimer = 0; }
             }
             
-            consumeEnergy() {
-                if (Math.random() < config.boostCostRate) {
-                    this.length -= 0.5;
-                    this.ejectMass();
-                }
-            }
+            consumeEnergy() { if (Math.random() < config.boostCostRate) { this.length -= 0.5; this.ejectMass(); } }
             normalizeAngle(angle) { while (angle < -Math.PI) angle += Math.PI * 2; while (angle > Math.PI) angle -= Math.PI * 2; return angle; }
             isDirectionSafe(checkAngle, distCheck) {
-                let pX = this.x + Math.cos(checkAngle) * distCheck;
-                let pY = this.y + Math.sin(checkAngle) * distCheck;
+                let pX = this.x + Math.cos(checkAngle) * distCheck; let pY = this.y + Math.sin(checkAngle) * distCheck;
                 let allSnakes = [player, ...bots];
                 for (let s of allSnakes) {
                     if (s.dead) continue;
@@ -526,16 +437,13 @@
                 if (this.panicLevel > 90 && Math.random() < 0.1) this.targetAngle = this.angle; 
             }
             detectDanger(lookDist) {
-                let allSnakes = [player, ...bots];
-                let closestDanger = null;
-                let minD = 9999;
+                let allSnakes = [player, ...bots]; let closestDanger = null; let minD = 9999;
                 for (let s of allSnakes) {
                     if (s.dead) continue;
                     if (dist(this.x, this.y, s.x, s.y) > lookDist + s.length*config.segmentDist) continue;
                     for (let i = 0; i < s.path.length; i += 3) {
                         if (s === this && i < 15) continue;
-                        let p = s.path[i];
-                        let d = dist(this.x, this.y, p.x, p.y);
+                        let p = s.path[i]; let d = dist(this.x, this.y, p.x, p.y);
                         if (d < lookDist) {
                             let angleToObj = Math.atan2(p.y - this.y, p.x - this.x);
                             let angleDiff = Math.abs(this.normalizeAngle(angleToObj - this.angle));
@@ -551,24 +459,19 @@
                 return closestDanger;
             }
             findBestFood() {
-                let best = null;
-                let minDist = 300; 
+                let best = null; let minDist = 300; 
                 for(let i=0; i<10; i++) {
                     let f = foods[Math.floor(rand(0, foods.length))];
                     if(!f) continue;
                     let d = dist(this.x, this.y, f.x, f.y);
-                    if (d < minDist) {
-                        if (f.value > 1 || d < 100) { minDist = d; best = f; }
-                    }
+                    if (d < minDist) { if (f.value > 1 || d < 100) { minDist = d; best = f; } }
                 }
                 return best;
             }
             ejectMass() {
-                let accumulatedDist = 0;
-                const visualLengthPx = this.length * config.segmentDist;
+                let accumulatedDist = 0; const visualLengthPx = this.length * config.segmentDist;
                 for(let i=0; i < this.path.length - 1; i++) {
-                    let p1 = this.path[i];
-                    let p2 = this.path[i+1];
+                    let p1 = this.path[i]; let p2 = this.path[i+1];
                     const d = dist(p1.x, p1.y, p2.x, p2.y);
                     accumulatedDist += d;
                     if (accumulatedDist >= visualLengthPx) {
@@ -576,21 +479,16 @@
                         return;
                     }
                 }
-                if (this.path.length > 0) {
-                    const tail = this.path[this.path.length - 1];
-                    foods.push(new Food(tail.x, tail.y, 1, this.color));
-                }
+                if (this.path.length > 0) { const tail = this.path[this.path.length - 1]; foods.push(new Food(tail.x, tail.y, 1, this.color)); }
             }
             eat(value) {
                 this.growQueue += value;
                 if (this.radius < 25) this.radius = config.baseRadius + Math.floor(this.length / 50);
             }
             die() {
-                let tempDist = 0;
-                let segmentCount = 0;
+                let tempDist = 0; let segmentCount = 0;
                 for (let i = 0; i < this.path.length - 1; i++) {
-                    let p1 = this.path[i];
-                    let p2 = this.path[i+1];
+                    let p1 = this.path[i]; let p2 = this.path[i+1];
                     tempDist += dist(p1.x, p1.y, p2.x, p2.y);
                     if (tempDist >= config.segmentDist) {
                         tempDist -= config.segmentDist;
@@ -605,105 +503,121 @@
                 }
             }
             draw(ctx) {
-                let currentDist = 0;
-                let drawnSegments = 0;
+                let currentDist = 0; let drawnSegments = 0;
                 for (let i = 0; i < this.path.length - 1; i++) {
-                    let p1 = this.path[i];
-                    let p2 = this.path[i+1];
+                    let p1 = this.path[i]; let p2 = this.path[i+1];
                     currentDist += dist(p1.x, p1.y, p2.x, p2.y);
                     if (currentDist >= config.segmentDist) {
                         currentDist -= config.segmentDist;
                         if (drawnSegments < Math.floor(this.length)) {
-                            ctx.beginPath();
-                            ctx.arc(p1.x, p1.y, this.radius, 0, Math.PI * 2);
+                            ctx.beginPath(); ctx.arc(p1.x, p1.y, this.radius, 0, Math.PI * 2);
                             ctx.fillStyle = (drawnSegments % 2 === 0) ? this.color : adjustColor(this.color, -20);
-                            ctx.fill();
-                            drawnSegments++;
+                            ctx.fill(); drawnSegments++;
                         }
                     }
                 }
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                ctx.rotate(this.angle);
-                ctx.fillStyle = this.headColor;
-                ctx.beginPath();
+                ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
+                ctx.fillStyle = this.headColor; ctx.beginPath();
                 ctx.arc(0, 0, this.radius + 1, 0, Math.PI * 2);
-                ctx.shadowColor = 'rgba(0,0,0,0.3)';
-                ctx.shadowBlur = 5;
-                ctx.fill();
-                ctx.shadowBlur = 0;
+                ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 5;
+                ctx.fill(); ctx.shadowBlur = 0;
                 ctx.fillStyle = 'white';
-                const eyeOffset = this.radius * 0.6;
-                const eyeSize = this.radius * 0.35;
-                ctx.beginPath();
-                ctx.arc(eyeOffset, -eyeOffset/1.5, eyeSize, 0, Math.PI*2);
-                ctx.arc(eyeOffset, eyeOffset/1.5, eyeSize, 0, Math.PI*2);
-                ctx.fill();
+                const eyeOffset = this.radius * 0.6; const eyeSize = this.radius * 0.35;
+                ctx.beginPath(); ctx.arc(eyeOffset, -eyeOffset/1.5, eyeSize, 0, Math.PI*2);
+                ctx.arc(eyeOffset, eyeOffset/1.5, eyeSize, 0, Math.PI*2); ctx.fill();
                 ctx.fillStyle = 'black';
                 const pupilSize = eyeSize * 0.5;
-                ctx.beginPath();
-                ctx.arc(eyeOffset + 2, -eyeOffset/1.5, pupilSize, 0, Math.PI*2);
-                ctx.arc(eyeOffset + 2, eyeOffset/1.5, pupilSize, 0, Math.PI*2);
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(eyeOffset + 2, -eyeOffset/1.5, pupilSize, 0, Math.PI*2);
+                ctx.arc(eyeOffset + 2, eyeOffset/1.5, pupilSize, 0, Math.PI*2); ctx.fill();
                 ctx.restore();
                 if(this.isBot) {
-                    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                    ctx.font = '10px Arial';
+                    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '10px Arial';
                     ctx.textAlign = 'center';
                     let info = this.fatigueTimer > 0 ? '💤' : (this.length <= config.initialLength ? '⚡❌' : '');
                     ctx.fillText('AI ' + info, this.x, this.y - this.radius - 8);
                 }
             }
         }
-
         function adjustColor(color, amount) { return color; }
 
         function init() {
             resize();
             window.addEventListener('resize', resize);
             
-            // PC 鼠标逻辑
+            // --- PC端输入 ---
             window.addEventListener('mousemove', e => { 
-                if (!joystick.active) {
+                if (!isTouchDevice) { // 只有非触摸设备才响应鼠标移动
                     mouse.x = e.clientX; 
                     mouse.y = e.clientY; 
                 }
             });
-            window.addEventListener('mousedown', () => isBoosting = true);
-            window.addEventListener('mouseup', () => isBoosting = false);
+            window.addEventListener('mousedown', e => {
+                if (!isTouchDevice) isBoosting = true;
+            });
+            window.addEventListener('mouseup', () => {
+                if (!isTouchDevice) isBoosting = false;
+            });
             
-            // 移动端 虚拟摇杆逻辑
+            // --- 移动端输入 (分离式) ---
             canvas.addEventListener('touchstart', e => { 
                 e.preventDefault();
-                // 任意位置生成摇杆
-                const touch = e.touches[0];
-                joystick.active = true;
-                joystick.originX = touch.clientX;
-                joystick.originY = touch.clientY;
-                joystick.currentX = touch.clientX;
-                joystick.currentY = touch.clientY;
-                
-                isBoosting = true; 
+                const touches = e.touches;
+
+                // 检查按下的手指是否是新的
+                for (let i=0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    
+                    if (joystick.id === null) {
+                        // 第一个手指：激活摇杆
+                        joystick.id = touch.identifier;
+                        joystick.active = true;
+                        joystick.originX = touch.clientX;
+                        joystick.originY = touch.clientY;
+                        joystick.currentX = touch.clientX;
+                        joystick.currentY = touch.clientY;
+                    } else {
+                        // 第二个手指：激活加速
+                        isBoosting = true;
+                    }
+                }
             }, {passive: false});
 
             canvas.addEventListener('touchmove', e => { 
                 e.preventDefault();
-                if (joystick.active) {
-                    const touch = e.touches[0];
-                    joystick.currentX = touch.clientX;
-                    joystick.currentY = touch.clientY;
-                    
-                    // 计算角度
-                    const dx = joystick.currentX - joystick.originX;
-                    const dy = joystick.currentY - joystick.originY;
-                    joystick.angle = Math.atan2(dy, dx);
+                for (let i=0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    // 如果移动的是摇杆手指
+                    if (touch.identifier === joystick.id) {
+                        joystick.currentX = touch.clientX;
+                        joystick.currentY = touch.clientY;
+                        
+                        const dx = joystick.currentX - joystick.originX;
+                        const dy = joystick.currentY - joystick.originY;
+                        joystick.angle = Math.atan2(dy, dx);
+                    }
                 }
             }, {passive: false});
 
             canvas.addEventListener('touchend', e => { 
                 e.preventDefault(); 
-                isBoosting = false; 
-                joystick.active = false; // 抬起手指，摇杆消失
+                
+                for (let i=0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    
+                    if (touch.identifier === joystick.id) {
+                        // 摇杆手指抬起
+                        joystick.id = null;
+                        joystick.active = false;
+                        // 摇杆抬起，强制停止加速
+                        isBoosting = false;
+                    }
+                }
+
+                // 检查是否还有其他手指（加速指）
+                // 如果只剩一个手指（摇杆指），或者没有手指了
+                if (e.touches.length < 2) {
+                    isBoosting = false;
+                }
             });
 
             resetGame();
@@ -714,8 +628,7 @@
         
         function resetGame() {
             player = new Snake(0, 0);
-            bots = [];
-            foods = [];
+            bots = []; foods = [];
             for(let i=0; i<config.foodCount; i++) spawnRandomFood();
             for(let i=0; i<config.botCount; i++) spawnBot();
             gameState = 'playing';
@@ -725,8 +638,7 @@
         function spawnRandomFood() { foods.push(new Food()); }
         function spawnBot() {
             const boundary = config.worldSize/2 - 50;
-            let x = rand(-boundary, boundary);
-            let y = rand(-boundary, boundary);
+            let x = rand(-boundary, boundary); let y = rand(-boundary, boundary);
             if (player && dist(x,y,player.x,player.y) < 400) x = -x;
             bots.push(new Snake(x, y, true));
         }
@@ -736,9 +648,7 @@
                 let f = foods[i];
                 if (Math.abs(f.x - player.x) < 80 && Math.abs(f.y - player.y) < 80) {
                     if (dist(player.x, player.y, f.x, f.y) < player.radius + f.radius + 5) {
-                        player.eat(f.value);
-                        foods.splice(i, 1);
-                        continue;
+                        player.eat(f.value); foods.splice(i, 1); continue;
                     }
                 }
             }
@@ -751,12 +661,10 @@
                 for (let s2 of allSnakes) {
                     if (s2.dead) continue;
                     if (dist(s1.x, s1.y, s2.x, s2.y) > (s2.length * config.segmentDist + 200)) continue;
-                    let currentDist = 0;
-                    let drawnSegments = 0;
+                    let currentDist = 0; let drawnSegments = 0;
                     let startNodeIndex = (s1 === s2) ? 12 : 0;
                     for (let k = 0; k < s2.path.length - 1; k++) {
-                        let p1 = s2.path[k];
-                        let p2 = s2.path[k+1];
+                        let p1 = s2.path[k]; let p2 = s2.path[k+1];
                         currentDist += dist(p1.x, p1.y, p2.x, p2.y);
                         if (currentDist >= config.segmentDist) {
                             currentDist -= config.segmentDist;
@@ -774,11 +682,7 @@
                 }
             });
             for (let i = bots.length - 1; i >= 0; i--) {
-                if (bots[i].dead) {
-                    bots[i].die();
-                    bots.splice(i, 1);
-                    spawnBot();
-                }
+                if (bots[i].dead) { bots[i].die(); bots.splice(i, 1); spawnBot(); }
             }
         }
 
@@ -793,8 +697,7 @@
         function drawGrid(ctx) {
             ctx.save();
             const limit = config.worldSize / 2;
-            ctx.lineWidth = 1;
-            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+            ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.03)';
             const gridSize = 80;
             const startX = Math.floor((camera.x - width/2) / gridSize) * gridSize;
             const startY = Math.floor((camera.y - height/2) / gridSize) * gridSize;
@@ -811,14 +714,12 @@
                     ctx.lineTo(limit - camera.x + width/2, y - camera.y + height/2);
                 }
             }
-            ctx.stroke();
-            ctx.restore();
+            ctx.stroke(); ctx.restore();
         }
 
         function drawMinimap() {
             minimapCtx.clearRect(0,0,140,140);
-            minimapCtx.save();
-            minimapCtx.translate(70, 70);
+            minimapCtx.save(); minimapCtx.translate(70, 70);
             const scale = 130 / config.worldSize; 
             minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
             minimapCtx.lineWidth = 1;
@@ -837,25 +738,19 @@
             minimapCtx.beginPath();
             minimapCtx.moveTo(player.x * scale, player.y * scale);
             minimapCtx.lineTo((player.x + Math.cos(player.angle)*1000) * scale, (player.y + Math.sin(player.angle)*1000) * scale);
-            minimapCtx.stroke();
-            minimapCtx.restore();
+            minimapCtx.stroke(); minimapCtx.restore();
         }
         
-        // 绘制虚拟摇杆
         function drawJoystick() {
             if (!joystick.active) return;
-            
             ctx.save();
-            // 绘制底座
             ctx.beginPath();
             ctx.arc(joystick.originX, joystick.originY, joystick.radius, 0, Math.PI * 2);
             ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.lineWidth = 2;
-            ctx.fill();
-            ctx.stroke();
+            ctx.fill(); ctx.stroke();
             
-            // 计算摇杆头位置 (限制在半径内)
             const dx = joystick.currentX - joystick.originX;
             const dy = joystick.currentY - joystick.originY;
             const distance = Math.sqrt(dx*dx + dy*dy);
@@ -868,16 +763,13 @@
                 drawY = joystick.originY + dy * ratio;
             }
             
-            // 绘制摇杆头
             ctx.beginPath();
-            ctx.arc(drawX, drawY, 20, 0, Math.PI * 2);
+            ctx.arc(drawX, drawY, 25, 0, Math.PI * 2); // 摇杆头大一点
             ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.fill();
-            ctx.restore();
+            ctx.fill(); ctx.restore();
         }
 
         function gameLoop() {
-            // 音乐更新
             AudioSys.update();
             
             if (gameState === 'playing') {
@@ -888,10 +780,8 @@
                 let rank = bots.filter(b => b.length > player.length).length + 1;
                 document.getElementById('rank-display').innerText = "排名: " + rank;
             }
-            camera.x = player.x;
-            camera.y = player.y;
-            ctx.fillStyle = '#151515'; 
-            ctx.fillRect(0, 0, width, height);
+            camera.x = player.x; camera.y = player.y;
+            ctx.fillStyle = '#151515'; ctx.fillRect(0, 0, width, height);
             ctx.save();
             ctx.translate(width/2 - camera.x, height/2 - camera.y);
             ctx.fillStyle = '#252525';
@@ -910,7 +800,7 @@
             if (gameState === 'playing') player.draw(ctx);
             ctx.restore();
             
-            drawJoystick(); // 绘制摇杆
+            if (isTouchDevice) drawJoystick(); // 只在触摸设备上绘制摇杆
             drawMinimap();
             requestAnimationFrame(gameLoop);
         }
