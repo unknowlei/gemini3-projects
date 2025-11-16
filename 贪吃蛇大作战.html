@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>贪吃蛇大作战 - 悦动版</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #151515;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* 禁止浏览器默认触摸行为 */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        canvas { display: block; }
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 10;
+        }
+        #top-bar {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+            pointer-events: auto;
+        }
+        #score-board {
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        #music-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.4);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+            pointer-events: auto;
+        }
+        #music-btn:hover { background: rgba(255,255,255,0.4); }
+        
+        #game-over {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 40px 60px;
+            border-radius: 20px;
+            text-align: center;
+            display: none;
+            pointer-events: auto;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+            z-index: 100;
+            min-width: 300px;
+        }
+        h1 { margin: 0 0 15px 0; color: #e74c3c; font-size: 36px; }
+        p { color: #2c3e50; margin-bottom: 30px; font-size: 20px; font-weight: 500; }
+        button.restart-btn {
+            background: linear-gradient(to bottom, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 15px 50px;
+            font-size: 22px;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 8px 15px rgba(41, 128, 185, 0.3);
+            transition: transform 0.1s, box-shadow 0.1s;
+            font-weight: bold;
+        }
+        button.restart-btn:active { transform: scale(0.95); box-shadow: 0 4px 10px rgba(41, 128, 185, 0.3); }
+        
+        #minimap-container {
+            position: absolute;
+            bottom: 25px;
+            right: 25px;
+            width: 140px;
+            height: 140px;
+            background: rgba(30, 30, 30, 0.6);
+            border: 4px solid rgba(255,255,255,0.2);
+            border-radius: 100%;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0,0,0,0.6);
+            backdrop-filter: blur(5px);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="top-bar">
+            <div id="score-board">
+                <span id="length-display">长度: 0</span> | 
+                <span id="rank-display">排名: -</span>
+            </div>
+            <button id="music-btn" onclick="toggleMusic()">🎵 开启音乐</button>
+        </div>
+        <div id="minimap-container"><canvas id="minimap-canvas"></canvas></div>
+    </div>
+
+    <div id="game-over">
+        <h1>游戏结束</h1>
+        <p id="death-reason">撞墙了</p>
+        <p id="final-score" style="font-size: 16px; color: #7f8c8d;">最终长度: 0</p>
+        <button class="restart-btn" onclick="resetGame()">再来一局</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- 游戏核心配置 (V12 - 新手友好 & 音乐版) ---
+        const config = {
+            worldSize: 3200,
+            
+            // --- 速度物理系统 (进一步降速，更易上手) ---
+            // 基础：Length=10 (小蛇)
+            maxBaseSpeed: 2.2,   // 从 2.55 降至 2.2
+            maxBoostSpeed: 4.2,  // 从 5.5 降至 4.2 (大幅降低极速，防止不可控)
+            
+            // 下限：Length=MAX (巨蛇)
+            minBaseSpeed: 1.4,   
+            minBoostSpeed: 2.8, 
+            
+            // 速度衰减：每增加1点长度，速度减少多少
+            speedDecay: 0.006, // 衰减稍微平缓一点
+
+            turnSpeed: 0.08,
+            segmentDist: 6,
+            baseRadius: 10,
+            initialLength: 10,
+            botCount: 25,
+            foodCount: 800,
+            boostCostRate: 0.15,
+            colors: [
+                '#FF6B6B', '#4ECDC4', '#FFE66D', '#FF9FF3', 
+                '#54A0FF', '#5F27CD', '#00D2D3', '#FF6B6B'
+            ]
+        };
+
+        // --- 音乐系统 (Web Audio API) ---
+        const AudioSys = {
+            ctx: null,
+            isPlaying: false,
+            nextNoteTime: 0,
+            noteIndex: 0,
+            // 简单的C大调五声音阶旋律，轻松惬意
+            melody: [
+                261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 
+                392.00, 329.63, 293.66, 329.63, 261.63, 
+                196.00, 220.00, 261.63
+            ],
+            // 节奏 (秒)
+            rhythm: [
+                0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 
+                0.5, 0.5, 0.5, 0.5, 1.0,
+                0.5, 0.5, 2.0
+            ],
+
+            init: function() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            },
+
+            playNote: function(freq, duration) {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine'; // 柔和的正弦波
+                osc.frequency.value = freq;
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                // 音量包络：淡入淡出
+                gain.gain.setValueAtTime(0, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.1, this.ctx.currentTime + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            },
+
+            update: function() {
+                if (!this.isPlaying || !this.ctx) return;
+                
+                // 简单的调度器
+                if (this.ctx.currentTime >= this.nextNoteTime) {
+                    const freq = this.melody[this.noteIndex];
+                    const dur = this.rhythm[this.noteIndex];
+                    
+                    // 稍微加入一点随机性，让它不那么机械
+                    this.playNote(freq, dur);
+                    
+                    this.nextNoteTime = this.ctx.currentTime + dur;
+                    this.noteIndex = (this.noteIndex + 1) % this.melody.length;
+                }
+            },
+
+            toggle: function() {
+                this.init();
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+                this.isPlaying = !this.isPlaying;
+                const btn = document.getElementById('music-btn');
+                btn.innerText = this.isPlaying ? "🎵 暂停音乐" : "🎵 开启音乐";
+                if (this.isPlaying) {
+                    this.nextNoteTime = this.ctx.currentTime;
+                    this.noteIndex = 0;
+                }
+            }
+        };
+
+        function toggleMusic() {
+            AudioSys.toggle();
+        }
+
+        // --- 全局变量 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const minimapCanvas = document.getElementById('minimap-canvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+        
+        let width, height;
+        let camera = { x: 0, y: 0 };
+        let mouse = { x: 0, y: 0 }; // 依然用于PC鼠标坐标
+        let isBoosting = false;
+        let gameState = 'playing';
+        
+        // 虚拟摇杆状态
+        let joystick = {
+            active: false,
+            originX: 0,
+            originY: 0,
+            currentX: 0,
+            currentY: 0,
+            radius: 60, // 摇杆最大半径
+            angle: 0    // 输出角度
+        };
+        
+        let player;
+        let bots = [];
+        let foods = [];
+
+        // --- 工具函数 ---
+        const rand = (min, max) => Math.random() * (max - min) + min;
+        const dist = (x1, y1, x2, y2) => Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        const randomColor = () => config.colors[Math.floor(Math.random() * config.colors.length)];
+
+        // --- 类定义 ---
+        class Food {
+            constructor(x, y, value = 1, color = null, isDeadBody = false) {
+                const boundary = config.worldSize / 2 - 20;
+                this.x = x !== undefined ? x : rand(-boundary, boundary);
+                this.y = y !== undefined ? y : rand(-boundary, boundary);
+                this.value = value; 
+                this.radius = isDeadBody ? rand(3, 6) : rand(2, 3.5); 
+                this.color = color || `hsl(${rand(0, 360)}, 80%, 60%)`;
+                this.floatOffset = rand(0, Math.PI * 2);
+                this.glowing = isDeadBody; 
+            }
+
+            draw(ctx) {
+                this.floatOffset += 0.04;
+                const scale = 1 + Math.sin(this.floatOffset) * 0.12;
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.scale(scale, scale);
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                if (this.glowing) {
+                    ctx.shadowColor = this.color;
+                    ctx.shadowBlur = 8;
+                }
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class Snake {
+            constructor(x, y, isBot = false) {
+                this.isBot = isBot;
+                this.x = x;
+                this.y = y;
+                this.angle = rand(0, Math.PI * 2);
+                this.targetAngle = this.angle;
+                
+                this.currentSpeed = config.maxBaseSpeed;
+                this.currentBaseSpeed = config.maxBaseSpeed;
+                this.currentBoostSpeed = config.maxBoostSpeed;
+
+                this.botSpeedMultiplier = isBot ? rand(0.8, 0.9) : 1.0; // AI略慢
+
+                this.radius = config.baseRadius;
+                this.color = isBot ? randomColor() : '#54a0ff'; 
+                this.headColor = isBot ? this.color : '#2e86de';
+                
+                this.length = config.initialLength; 
+                this.path = []; 
+                for(let i=0; i<this.length * 3; i++) {
+                    this.path.push({x: x, y: y});
+                }
+
+                this.growQueue = 0;
+                this.dead = false;
+
+                if (this.isBot) {
+                    const r = Math.random();
+                    if (r < 0.3) this.personality = 'aggressive'; 
+                    else if (r < 0.6) this.personality = 'cautious'; 
+                    else this.personality = 'normal'; 
+                }
+                
+                this.aiTimer = 0;
+                this.panicLevel = 0;
+                this.burstTimer = 0;
+                this.burstLimit = 0;
+                this.fatigueTimer = 0;
+            }
+
+            updateSpeedStats() {
+                const drag = Math.max(0, (this.length - config.initialLength) * config.speedDecay);
+                this.currentBaseSpeed = Math.max(config.minBaseSpeed, config.maxBaseSpeed - drag);
+                let rawBoost = Math.max(config.minBoostSpeed, config.maxBoostSpeed - drag);
+                this.currentBoostSpeed = rawBoost * this.botSpeedMultiplier;
+            }
+
+            update() {
+                if (this.dead) return;
+                this.updateSpeedStats();
+
+                if (!this.isBot) {
+                    this.handlePlayerInput();
+                } else {
+                    this.handleBotAI();
+                }
+
+                // 平滑转向
+                let diff = this.targetAngle - this.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                this.angle += diff * config.turnSpeed;
+
+                this.x += Math.cos(this.angle) * this.currentSpeed;
+                this.y += Math.sin(this.angle) * this.currentSpeed;
+
+                // 边界检测
+                const limit = config.worldSize / 2;
+                if (!this.isBot) {
+                    if (Math.abs(this.x) > limit - this.radius || Math.abs(this.y) > limit - this.radius) {
+                        this.dead = true;
+                        triggerGameOver("冲出了世界");
+                        return;
+                    }
+                } else {
+                    if (Math.abs(this.x) > limit || Math.abs(this.y) > limit) {
+                        this.dead = true; 
+                    }
+                }
+
+                this.path.unshift({x: this.x, y: this.y});
+                if (this.growQueue > 0) {
+                    this.length += 0.1; 
+                    this.growQueue -= 0.1;
+                }
+                
+                const neededPoints = (this.length * config.segmentDist) / (config.minBaseSpeed * 0.5) + 150;
+                while (this.path.length > neededPoints) {
+                    this.path.pop();
+                }
+            }
+
+            handlePlayerInput() {
+                if (joystick.active) {
+                    // 使用虚拟摇杆角度
+                    this.targetAngle = joystick.angle;
+                } else {
+                    // 使用鼠标
+                    const worldMouseX = mouse.x + camera.x - width/2;
+                    const worldMouseY = mouse.y + camera.y - height/2;
+                    this.targetAngle = Math.atan2(worldMouseY - this.y, worldMouseX - this.x);
+                }
+                
+                if (isBoosting && this.length > config.initialLength) {
+                    this.currentSpeed = this.currentBoostSpeed;
+                    if (Math.random() < config.boostCostRate) {
+                        this.length -= 0.5; 
+                        this.ejectMass();   
+                    }
+                } else {
+                    this.currentSpeed = this.currentBaseSpeed;
+                }
+            }
+
+            handleBotAI() {
+                let isFatigued = false;
+                if (this.fatigueTimer > 0) {
+                    this.fatigueTimer--;
+                    isFatigued = true;
+                    this.burstTimer = 0; 
+                }
+                
+                let detectionDist = 80 + (this.currentSpeed * 15); 
+                if (this.personality === 'cautious') detectionDist += 50;
+
+                let danger = this.detectDanger(detectionDist);
+                if (danger && danger.dist < 60) this.panicLevel = Math.min(this.panicLevel + 10, 100);
+                else this.panicLevel = Math.max(this.panicLevel - 2, 0);
+
+                let wantsToBoost = false;
+
+                if (danger) {
+                    let canAttack = false;
+                    if (this.length > config.initialLength && !isFatigued && this.personality === 'aggressive' && this.panicLevel < 80) {
+                        if (!danger.isSelf && !danger.isWall) {
+                            let angleDiff = this.normalizeAngle(danger.angle - this.angle);
+                            if (Math.abs(angleDiff) < Math.PI / 1.5 && Math.abs(angleDiff) > 0.3) {
+                                canAttack = true;
+                            }
+                        }
+                    }
+
+                    if (canAttack) {
+                        let attackAngle = danger.angle + (this.normalizeAngle(danger.angle - this.angle) > 0 ? 0.6 : -0.6);
+                        if (this.isDirectionSafe(attackAngle, detectionDist * 0.8)) {
+                            this.targetAngle = attackAngle;
+                            wantsToBoost = true;
+                        } else {
+                            this.performDodge(danger);
+                        }
+                    } else {
+                        this.performDodge(danger);
+                        if (this.personality === 'cautious' || this.panicLevel > 50) {
+                             wantsToBoost = true;
+                        }
+                    }
+                } else {
+                    const limit = config.worldSize / 2;
+                    const safeMargin = 150; 
+                    let nearWall = false;
+                    if (this.x < -limit + safeMargin) { this.targetAngle = 0; nearWall = true; } 
+                    else if (this.x > limit - safeMargin) { this.targetAngle = Math.PI; nearWall = true; } 
+                    else if (this.y < -limit + safeMargin) { this.targetAngle = Math.PI/2; nearWall = true; } 
+                    else if (this.y > limit - safeMargin) { this.targetAngle = -Math.PI/2; nearWall = true; } 
+
+                    if (!nearWall) {
+                        this.aiTimer--;
+                        if (this.aiTimer <= 0) {
+                            this.aiTimer = rand(20, 60);
+                            let bestFood = this.findBestFood();
+                            if (bestFood) {
+                                let foodAngle = Math.atan2(bestFood.y - this.y, bestFood.x - this.x);
+                                if (this.isDirectionSafe(foodAngle, detectionDist)) this.targetAngle = foodAngle;
+                                else this.targetAngle = this.angle + rand(-1, 1);
+                            } else {
+                                let randomAngle = this.angle + rand(-1, 1);
+                                if (this.isDirectionSafe(randomAngle, detectionDist)) this.targetAngle = randomAngle;
+                            }
+                            
+                            if (this.length > config.initialLength + 10 && !isFatigued && this.personality !== 'cautious' && Math.random() < 0.02) {
+                                if (this.isDirectionSafe(this.targetAngle, detectionDist * 1.5)) wantsToBoost = true;
+                            }
+                        }
+                    } else {
+                        wantsToBoost = false;
+                    }
+                }
+
+                if (wantsToBoost && !isFatigued && this.length > config.initialLength) {
+                    if (this.burstTimer === 0) {
+                        this.burstLimit = rand(30, 150); 
+                        if (this.personality === 'aggressive') this.burstLimit += 50;
+                    }
+                    this.currentSpeed = this.currentBoostSpeed;
+                    this.consumeEnergy();
+                    this.burstTimer++;
+                    if (this.burstTimer >= this.burstLimit) {
+                        this.fatigueTimer = rand(60, 180);
+                        this.burstTimer = 0;
+                        this.currentSpeed = this.currentBaseSpeed;
+                    }
+                } else {
+                    this.currentSpeed = this.currentBaseSpeed;
+                    this.burstTimer = 0;
+                }
+            }
+            
+            consumeEnergy() {
+                if (Math.random() < config.boostCostRate) {
+                    this.length -= 0.5;
+                    this.ejectMass();
+                }
+            }
+            normalizeAngle(angle) { while (angle < -Math.PI) angle += Math.PI * 2; while (angle > Math.PI) angle -= Math.PI * 2; return angle; }
+            isDirectionSafe(checkAngle, distCheck) {
+                let pX = this.x + Math.cos(checkAngle) * distCheck;
+                let pY = this.y + Math.sin(checkAngle) * distCheck;
+                let allSnakes = [player, ...bots];
+                for (let s of allSnakes) {
+                    if (s.dead) continue;
+                    if (dist(pX, pY, s.x, s.y) > s.length * config.segmentDist + distCheck) continue;
+                    for (let i = 0; i < s.path.length; i+=5) {
+                        if (s === this && i < 20) continue;
+                        if (dist(pX, pY, s.path[i].x, s.path[i].y) < this.radius + s.radius + 10) return false;
+                    }
+                }
+                return true;
+            }
+            performDodge(dangerObj) {
+                let angleDiff = this.normalizeAngle(dangerObj.angle - this.angle);
+                if (angleDiff > 0) this.targetAngle = this.angle - Math.PI / 1.5; 
+                else this.targetAngle = this.angle + Math.PI / 1.5;
+                if (this.panicLevel > 90 && Math.random() < 0.1) this.targetAngle = this.angle; 
+            }
+            detectDanger(lookDist) {
+                let allSnakes = [player, ...bots];
+                let closestDanger = null;
+                let minD = 9999;
+                for (let s of allSnakes) {
+                    if (s.dead) continue;
+                    if (dist(this.x, this.y, s.x, s.y) > lookDist + s.length*config.segmentDist) continue;
+                    for (let i = 0; i < s.path.length; i += 3) {
+                        if (s === this && i < 15) continue;
+                        let p = s.path[i];
+                        let d = dist(this.x, this.y, p.x, p.y);
+                        if (d < lookDist) {
+                            let angleToObj = Math.atan2(p.y - this.y, p.x - this.x);
+                            let angleDiff = Math.abs(this.normalizeAngle(angleToObj - this.angle));
+                            if (angleDiff < Math.PI / 3) {
+                                if (d < minD) {
+                                    minD = d;
+                                    closestDanger = { angle: angleToObj, dist: d, isSelf: (s === this), isWall: false };
+                                }
+                            }
+                        }
+                    }
+                }
+                return closestDanger;
+            }
+            findBestFood() {
+                let best = null;
+                let minDist = 300; 
+                for(let i=0; i<10; i++) {
+                    let f = foods[Math.floor(rand(0, foods.length))];
+                    if(!f) continue;
+                    let d = dist(this.x, this.y, f.x, f.y);
+                    if (d < minDist) {
+                        if (f.value > 1 || d < 100) { minDist = d; best = f; }
+                    }
+                }
+                return best;
+            }
+            ejectMass() {
+                let accumulatedDist = 0;
+                const visualLengthPx = this.length * config.segmentDist;
+                for(let i=0; i < this.path.length - 1; i++) {
+                    let p1 = this.path[i];
+                    let p2 = this.path[i+1];
+                    const d = dist(p1.x, p1.y, p2.x, p2.y);
+                    accumulatedDist += d;
+                    if (accumulatedDist >= visualLengthPx) {
+                        foods.push(new Food(p1.x + rand(-3, 3), p1.y + rand(-3, 3), 1, this.color));
+                        return;
+                    }
+                }
+                if (this.path.length > 0) {
+                    const tail = this.path[this.path.length - 1];
+                    foods.push(new Food(tail.x, tail.y, 1, this.color));
+                }
+            }
+            eat(value) {
+                this.growQueue += value;
+                if (this.radius < 25) this.radius = config.baseRadius + Math.floor(this.length / 50);
+            }
+            die() {
+                let tempDist = 0;
+                let segmentCount = 0;
+                for (let i = 0; i < this.path.length - 1; i++) {
+                    let p1 = this.path[i];
+                    let p2 = this.path[i+1];
+                    tempDist += dist(p1.x, p1.y, p2.x, p2.y);
+                    if (tempDist >= config.segmentDist) {
+                        tempDist -= config.segmentDist;
+                        if (segmentCount < Math.floor(this.length)) {
+                            let val = Math.max(1, Math.floor(this.radius / 3.5));
+                            let dropX = Math.max(-config.worldSize/2 + 10, Math.min(config.worldSize/2 - 10, p1.x));
+                            let dropY = Math.max(-config.worldSize/2 + 10, Math.min(config.worldSize/2 - 10, p1.y));
+                            foods.push(new Food(dropX + rand(-5, 5), dropY + rand(-5, 5), val * 2, this.color, true));
+                            segmentCount++;
+                        }
+                    }
+                }
+            }
+            draw(ctx) {
+                let currentDist = 0;
+                let drawnSegments = 0;
+                for (let i = 0; i < this.path.length - 1; i++) {
+                    let p1 = this.path[i];
+                    let p2 = this.path[i+1];
+                    currentDist += dist(p1.x, p1.y, p2.x, p2.y);
+                    if (currentDist >= config.segmentDist) {
+                        currentDist -= config.segmentDist;
+                        if (drawnSegments < Math.floor(this.length)) {
+                            ctx.beginPath();
+                            ctx.arc(p1.x, p1.y, this.radius, 0, Math.PI * 2);
+                            ctx.fillStyle = (drawnSegments % 2 === 0) ? this.color : adjustColor(this.color, -20);
+                            ctx.fill();
+                            drawnSegments++;
+                        }
+                    }
+                }
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.fillStyle = this.headColor;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius + 1, 0, Math.PI * 2);
+                ctx.shadowColor = 'rgba(0,0,0,0.3)';
+                ctx.shadowBlur = 5;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'white';
+                const eyeOffset = this.radius * 0.6;
+                const eyeSize = this.radius * 0.35;
+                ctx.beginPath();
+                ctx.arc(eyeOffset, -eyeOffset/1.5, eyeSize, 0, Math.PI*2);
+                ctx.arc(eyeOffset, eyeOffset/1.5, eyeSize, 0, Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = 'black';
+                const pupilSize = eyeSize * 0.5;
+                ctx.beginPath();
+                ctx.arc(eyeOffset + 2, -eyeOffset/1.5, pupilSize, 0, Math.PI*2);
+                ctx.arc(eyeOffset + 2, eyeOffset/1.5, pupilSize, 0, Math.PI*2);
+                ctx.fill();
+                ctx.restore();
+                if(this.isBot) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'center';
+                    let info = this.fatigueTimer > 0 ? '💤' : (this.length <= config.initialLength ? '⚡❌' : '');
+                    ctx.fillText('AI ' + info, this.x, this.y - this.radius - 8);
+                }
+            }
+        }
+
+        function adjustColor(color, amount) { return color; }
+
+        function init() {
+            resize();
+            window.addEventListener('resize', resize);
+            
+            // PC 鼠标逻辑
+            window.addEventListener('mousemove', e => { 
+                if (!joystick.active) {
+                    mouse.x = e.clientX; 
+                    mouse.y = e.clientY; 
+                }
+            });
+            window.addEventListener('mousedown', () => isBoosting = true);
+            window.addEventListener('mouseup', () => isBoosting = false);
+            
+            // 移动端 虚拟摇杆逻辑
+            canvas.addEventListener('touchstart', e => { 
+                e.preventDefault();
+                // 任意位置生成摇杆
+                const touch = e.touches[0];
+                joystick.active = true;
+                joystick.originX = touch.clientX;
+                joystick.originY = touch.clientY;
+                joystick.currentX = touch.clientX;
+                joystick.currentY = touch.clientY;
+                
+                isBoosting = true; 
+            }, {passive: false});
+
+            canvas.addEventListener('touchmove', e => { 
+                e.preventDefault();
+                if (joystick.active) {
+                    const touch = e.touches[0];
+                    joystick.currentX = touch.clientX;
+                    joystick.currentY = touch.clientY;
+                    
+                    // 计算角度
+                    const dx = joystick.currentX - joystick.originX;
+                    const dy = joystick.currentY - joystick.originY;
+                    joystick.angle = Math.atan2(dy, dx);
+                }
+            }, {passive: false});
+
+            canvas.addEventListener('touchend', e => { 
+                e.preventDefault(); 
+                isBoosting = false; 
+                joystick.active = false; // 抬起手指，摇杆消失
+            });
+
+            resetGame();
+            gameLoop();
+        }
+
+        function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; minimapCanvas.width = 140; minimapCanvas.height = 140; }
+        
+        function resetGame() {
+            player = new Snake(0, 0);
+            bots = [];
+            foods = [];
+            for(let i=0; i<config.foodCount; i++) spawnRandomFood();
+            for(let i=0; i<config.botCount; i++) spawnBot();
+            gameState = 'playing';
+            document.getElementById('game-over').style.display = 'none';
+        }
+
+        function spawnRandomFood() { foods.push(new Food()); }
+        function spawnBot() {
+            const boundary = config.worldSize/2 - 50;
+            let x = rand(-boundary, boundary);
+            let y = rand(-boundary, boundary);
+            if (player && dist(x,y,player.x,player.y) < 400) x = -x;
+            bots.push(new Snake(x, y, true));
+        }
+
+        function checkCollisions() {
+            for (let i = foods.length - 1; i >= 0; i--) {
+                let f = foods[i];
+                if (Math.abs(f.x - player.x) < 80 && Math.abs(f.y - player.y) < 80) {
+                    if (dist(player.x, player.y, f.x, f.y) < player.radius + f.radius + 5) {
+                        player.eat(f.value);
+                        foods.splice(i, 1);
+                        continue;
+                    }
+                }
+            }
+            bots.forEach(bot => { if(Math.random() < 0.03) bot.eat(1); });
+            while (foods.length < config.foodCount) spawnRandomFood();
+
+            let allSnakes = [player, ...bots];
+            allSnakes.forEach(s1 => {
+                if (s1.dead) return;
+                for (let s2 of allSnakes) {
+                    if (s2.dead) continue;
+                    if (dist(s1.x, s1.y, s2.x, s2.y) > (s2.length * config.segmentDist + 200)) continue;
+                    let currentDist = 0;
+                    let drawnSegments = 0;
+                    let startNodeIndex = (s1 === s2) ? 12 : 0;
+                    for (let k = 0; k < s2.path.length - 1; k++) {
+                        let p1 = s2.path[k];
+                        let p2 = s2.path[k+1];
+                        currentDist += dist(p1.x, p1.y, p2.x, p2.y);
+                        if (currentDist >= config.segmentDist) {
+                            currentDist -= config.segmentDist;
+                            drawnSegments++;
+                            if (drawnSegments > startNodeIndex && drawnSegments <= Math.floor(s2.length)) {
+                                if (dist(s1.x, s1.y, p1.x, p1.y) < s1.radius + s2.radius - 3) {
+                                    s1.dead = true;
+                                    if (s1 === player) triggerGameOver(s1 === s2 ? "贪吃咬到了自己" : "撞到了别人");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (s1.dead) break;
+                }
+            });
+            for (let i = bots.length - 1; i >= 0; i--) {
+                if (bots[i].dead) {
+                    bots[i].die();
+                    bots.splice(i, 1);
+                    spawnBot();
+                }
+            }
+        }
+
+        function triggerGameOver(reason) {
+            gameState = 'over';
+            document.getElementById('death-reason').innerText = "死因: " + reason;
+            document.getElementById('final-score').innerText = "最终长度: " + Math.floor(player.length);
+            document.getElementById('game-over').style.display = 'block';
+            player.die();
+        }
+
+        function drawGrid(ctx) {
+            ctx.save();
+            const limit = config.worldSize / 2;
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+            const gridSize = 80;
+            const startX = Math.floor((camera.x - width/2) / gridSize) * gridSize;
+            const startY = Math.floor((camera.y - height/2) / gridSize) * gridSize;
+            ctx.beginPath();
+            for (let x = startX; x < startX + width + gridSize; x += gridSize) {
+                if (x > -limit && x < limit) {
+                    ctx.moveTo(x - camera.x + width/2, -limit - camera.y + height/2);
+                    ctx.lineTo(x - camera.x + width/2, limit - camera.y + height/2);
+                }
+            }
+            for (let y = startY; y < startY + height + gridSize; y += gridSize) {
+                if (y > -limit && y < limit) {
+                    ctx.moveTo(-limit - camera.x + width/2, y - camera.y + height/2);
+                    ctx.lineTo(limit - camera.x + width/2, y - camera.y + height/2);
+                }
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawMinimap() {
+            minimapCtx.clearRect(0,0,140,140);
+            minimapCtx.save();
+            minimapCtx.translate(70, 70);
+            const scale = 130 / config.worldSize; 
+            minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            minimapCtx.lineWidth = 1;
+            minimapCtx.strokeRect(-config.worldSize/2 * scale, -config.worldSize/2 * scale, config.worldSize * scale, config.worldSize * scale);
+            minimapCtx.fillStyle = '#ff4757';
+            bots.forEach(b => {
+                minimapCtx.beginPath();
+                minimapCtx.arc(b.x * scale, b.y * scale, 1.5, 0, Math.PI*2);
+                minimapCtx.fill();
+            });
+            minimapCtx.fillStyle = '#fff';
+            minimapCtx.beginPath();
+            minimapCtx.arc(player.x * scale, player.y * scale, 2.5, 0, Math.PI*2);
+            minimapCtx.fill();
+            minimapCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(player.x * scale, player.y * scale);
+            minimapCtx.lineTo((player.x + Math.cos(player.angle)*1000) * scale, (player.y + Math.sin(player.angle)*1000) * scale);
+            minimapCtx.stroke();
+            minimapCtx.restore();
+        }
+        
+        // 绘制虚拟摇杆
+        function drawJoystick() {
+            if (!joystick.active) return;
+            
+            ctx.save();
+            // 绘制底座
+            ctx.beginPath();
+            ctx.arc(joystick.originX, joystick.originY, joystick.radius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.fill();
+            ctx.stroke();
+            
+            // 计算摇杆头位置 (限制在半径内)
+            const dx = joystick.currentX - joystick.originX;
+            const dy = joystick.currentY - joystick.originY;
+            const distance = Math.sqrt(dx*dx + dy*dy);
+            let drawX = joystick.currentX;
+            let drawY = joystick.currentY;
+            
+            if (distance > joystick.radius) {
+                const ratio = joystick.radius / distance;
+                drawX = joystick.originX + dx * ratio;
+                drawY = joystick.originY + dy * ratio;
+            }
+            
+            // 绘制摇杆头
+            ctx.beginPath();
+            ctx.arc(drawX, drawY, 20, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function gameLoop() {
+            // 音乐更新
+            AudioSys.update();
+            
+            if (gameState === 'playing') {
+                player.update();
+                bots.forEach(b => b.update());
+                checkCollisions();
+                document.getElementById('length-display').innerText = "长度: " + Math.floor(player.length);
+                let rank = bots.filter(b => b.length > player.length).length + 1;
+                document.getElementById('rank-display').innerText = "排名: " + rank;
+            }
+            camera.x = player.x;
+            camera.y = player.y;
+            ctx.fillStyle = '#151515'; 
+            ctx.fillRect(0, 0, width, height);
+            ctx.save();
+            ctx.translate(width/2 - camera.x, height/2 - camera.y);
+            ctx.fillStyle = '#252525';
+            const limit = config.worldSize/2;
+            ctx.fillRect(-limit, -limit, config.worldSize, config.worldSize);
+            ctx.restore();
+            ctx.save();
+            ctx.translate(width/2 - camera.x, height/2 - camera.y);
+            drawGrid(ctx);
+            foods.forEach(f => {
+                if (Math.abs(f.x - camera.x) < width/2 + 100 && Math.abs(f.y - camera.y) < height/2 + 100) {
+                    f.draw(ctx);
+                }
+            });
+            bots.forEach(b => b.draw(ctx));
+            if (gameState === 'playing') player.draw(ctx);
+            ctx.restore();
+            
+            drawJoystick(); // 绘制摇杆
+            drawMinimap();
+            requestAnimationFrame(gameLoop);
+        }
+
+        init();
+    </script>
+</body>
+</html>
