@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS ACADEMIA | 毕业设计指挥中枢</title>
+    
+    <!-- 引入 Chart.js 用于数据可视化 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 引入 FontAwesome 图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* =========================================
+           1. 核心变量与赛博样式系统 (System Core)
+           ========================================= */
+        :root {
+            --bg-void: #050b14;
+            --bg-panel: rgba(16, 24, 39, 0.7);
+            --bg-panel-hover: rgba(30, 41, 59, 0.8);
+            
+            /* 核心霓虹色 */
+            --neon-blue: #00f3ff;    /* 系统主色 */
+            --neon-purple: #bc13fe;  /* 辅助色 */
+            --neon-green: #0aff60;   /* 成功/通过 */
+            --neon-red: #ff003c;     /* 警告/挂科 */
+            --neon-gold: #ffd700;    /* 重点/答辩 */
+
+            --text-main: #e2e8f0;
+            --text-muted: #64748b;
+            
+            --border-glass: 1px solid rgba(255, 255, 255, 0.1);
+            --glass-blur: blur(12px);
+            --font-tech: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background-color: var(--bg-void);
+            color: var(--text-main);
+            font-family: var(--font-tech);
+            height: 100vh;
+            overflow: hidden;
+            /* 动态网格背景 */
+            background-image: 
+                linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-void); }
+        ::-webkit-scrollbar-thumb { background: var(--neon-blue); border-radius: 3px; }
+
+        /* 通用组件：玻璃面板 */
+        .panel-glass {
+            background: var(--bg-panel);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: var(--border-glass);
+            border-radius: 4px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        /* 通用组件：赛博按钮 */
+        .btn-cyber {
+            position: relative;
+            padding: 10px 25px;
+            background: transparent;
+            color: var(--neon-blue);
+            border: 1px solid var(--neon-blue);
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            cursor: pointer;
+            clip-path: polygon(10% 0, 100% 0, 100% 70%, 90% 100%, 0 100%, 0 30%);
+            transition: all 0.3s;
+            font-size: 0.9rem;
+        }
+        .btn-cyber:hover {
+            background: var(--neon-blue);
+            color: #000;
+            box-shadow: 0 0 15px var(--neon-blue);
+        }
+        .btn-cyber.danger { color: var(--neon-red); border-color: var(--neon-red); }
+        .btn-cyber.danger:hover { background: var(--neon-red); color: #000; box-shadow: 0 0 15px var(--neon-red); }
+
+        /* 通用组件：状态胶囊 */
+        .status-badge {
+            padding: 2px 8px;
+            font-size: 0.75rem;
+            border: 1px solid currentColor;
+            border-radius: 2px;
+            text-transform: uppercase;
+        }
+        .st-green { color: var(--neon-green); background: rgba(10, 255, 96, 0.1); }
+        .st-red { color: var(--neon-red); background: rgba(255, 0, 60, 0.1); }
+        .st-blue { color: var(--neon-blue); background: rgba(0, 243, 255, 0.1); }
+
+        /* 动画定义 */
+        @keyframes scanline { 0% { top: -20%; } 100% { top: 120%; } }
+        @keyframes flicker { 0% { opacity: 1; } 5% { opacity: 0.8; } 10% { opacity: 1; } }
+        @keyframes slideIn { from { transform: translateX(50px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        /* =========================================
+           2. 登录全屏界面 (Identity Verification)
+           ========================================= */
+        #login-layer {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999;
+            background: radial-gradient(circle at center, #1a2c42 0%, #000 100%);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .login-box {
+            width: 450px; padding: 40px;
+            border: 1px solid var(--neon-blue);
+            position: relative;
+            box-shadow: 0 0 40px rgba(0, 243, 255, 0.1);
+        }
+        .login-box::after { /* 扫描线特效 */
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(to bottom, transparent, rgba(0, 243, 255, 0.2), transparent);
+            animation: scanline 3s linear infinite; pointer-events: none;
+        }
+        .login-input {
+            width: 100%; background: rgba(0,0,0,0.5); border: none; border-bottom: 1px solid var(--text-muted);
+            color: white; padding: 12px; margin-bottom: 20px; font-family: monospace; font-size: 1.1rem;
+            transition: 0.3s;
+        }
+        .login-input:focus { outline: none; border-bottom-color: var(--neon-blue); box-shadow: 0 10px 20px -10px rgba(0,243,255,0.2); }
+
+        /* =========================================
+           3. 主界面布局 (Main HUD)
+           ========================================= */
+        #app-layer { display: none; width: 100vw; height: 100vh; display: flex; }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 260px; background: rgba(5, 11, 20, 0.95); border-right: var(--border-glass);
+            display: flex; flex-direction: column; z-index: 10;
+        }
+        .brand-area {
+            height: 80px; display: flex; align-items: center; justify-content: center;
+            border-bottom: var(--border-glass); font-size: 1.2rem; letter-spacing: 2px; font-weight: bold;
+            color: var(--neon-blue); text-shadow: 0 0 10px var(--neon-blue);
+        }
+        .nav-menu { flex: 1; padding: 20px 0; }
+        .nav-item {
+            padding: 15px 30px; cursor: pointer; color: var(--text-muted); transition: 0.3s;
+            display: flex; align-items: center; gap: 15px; border-left: 3px solid transparent;
+        }
+        .nav-item:hover, .nav-item.active {
+            color: var(--text-main); background: rgba(0, 243, 255, 0.05);
+            border-left-color: var(--neon-blue); text-shadow: 0 0 8px var(--neon-blue);
+        }
+
+        /* 内容区 */
+        .main-viewport { flex: 1; display: flex; flex-direction: column; position: relative; background-size: cover; overflow: hidden; }
+        
+        /* 顶部信息条 */
+        .top-hud {
+            height: 60px; display: flex; justify-content: space-between; align-items: center;
+            padding: 0 30px; border-bottom: var(--border-glass); background: rgba(5, 11, 20, 0.8);
+        }
+        .sys-status { font-family: monospace; color: var(--neon-green); font-size: 0.9rem; }
+        
+        /* 页面容器 */
+        .content-grid { flex: 1; padding: 30px; overflow-y: auto; position: relative; }
+        .section-title {
+            font-size: 1.8rem; margin-bottom: 25px; text-transform: uppercase; letter-spacing: 3px;
+            border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; display: inline-block;
+        }
+        .section-title span { color: var(--neon-blue); }
+
+        /* 仪表盘特殊样式 */
+        .dashboard-widgets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+        .widget-card { padding: 20px; position: relative; overflow: hidden; }
+        .widget-val { font-size: 2.5rem; font-weight: bold; color: white; margin: 10px 0; }
+        .widget-label { font-size: 0.8rem; color: var(--text-muted); letter-spacing: 1px; text-transform: uppercase; }
+        
+        /* 答辩倒计时样式 */
+        .doomsday-clock {
+            font-family: monospace; font-size: 1.5rem; color: var(--neon-red);
+            text-shadow: 0 0 10px var(--neon-red); animation: flicker 2s infinite;
+        }
+
+        /* 隐藏类 */
+        .hidden { display: none !important; }
+
+        /* 自定义 Toast */
+        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
+        .toast-msg {
+            background: rgba(0,0,0,0.9); border: 1px solid var(--neon-blue); color: var(--neon-blue);
+            padding: 15px 20px; min-width: 300px; display: flex; align-items: center; gap: 15px;
+            clip-path: polygon(0 0, 100% 0, 100% 100%, 15px 100%, 0 calc(100% - 15px));
+            animation: slideIn 0.3s ease; box-shadow: 0 0 15px rgba(0,243,255,0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 全局 Toast 容器 -->
+    <div id="toast-container"></div>
+
+    <!-- 1. 登录层 (Identity Verification) -->
+    <div id="login-layer">
+        <div class="login-box panel-glass">
+            <div style="text-align: center; margin-bottom: 30px;">
+                <i class="fa-solid fa-shield-halved" style="font-size: 3rem; color: var(--neon-blue); margin-bottom: 15px;"></i>
+                <h2 style="letter-spacing: 4px; text-transform: uppercase;">身份识别协议</h2>
+                <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 5px;">GRADUATION DEFENSE PROTOCOL v9.0</p>
+            </div>
+            
+            <div style="font-family: monospace; color: var(--neon-blue); margin-bottom: 10px;">> 请输入接入ID:</div>
+            <input type="text" id="login-id" class="login-input" placeholder="admin / teacher / student" value="student">
+            
+            <div style="font-family: monospace; color: var(--neon-blue); margin-bottom: 10px;">> 密匙口令:</div>
+            <input type="password" id="login-pwd" class="login-input" value="123456">
+            
+            <button class="btn-cyber" style="width: 100%; margin-top: 20px;" onclick="App.login()">
+                <i class="fa-solid fa-fingerprint"></i> 建立神经连接
+            </button>
+
+            <div style="margin-top: 20px; text-align: center; font-size: 0.7rem; color: #555;">
+                未授权的访问将触发反制措施<br>System Integrity: 98%
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 主应用层 (Main Interface) -->
+    <div id="app-layer">
+        <!-- 左侧导航 -->
+        <aside class="sidebar">
+            <div class="brand-area">
+                <i class="fa-brands fa-unity" style="margin-right: 10px;"></i> NEXUS
+            </div>
+            <div class="nav-menu" id="nav-container">
+                <!-- JS 动态渲染菜单 -->
+            </div>
+            
+            <!-- 用户信息区 -->
+            <div style="padding: 20px; border-top: var(--border-glass); background: rgba(0,0,0,0.3);">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <div style="width: 35px; height: 35px; background: var(--neon-blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: black; font-weight: bold;">S</div>
+                    <div>
+                        <div style="font-size: 0.9rem; color: white;" id="user-name-display">Student</div>
+                        <div style="font-size: 0.7rem; color: var(--neon-blue);" id="user-role-display">LEVEL 1 ACCESS</div>
+                    </div>
+                </div>
+                <button class="btn-cyber danger" style="width: 100%; padding: 5px;" onclick="App.logout()">断开连接</button>
+            </div>
+        </aside>
+
+        <!-- 右侧视口 -->
+        <main class="main-viewport">
+            <!-- 顶部 HUD -->
+            <header class="top-hud">
+                <div class="sys-status">
+                    <i class="fa-solid fa-server"></i> 服务器状态: <span style="color:var(--neon-green)">在线</span> 
+                    <span style="margin: 0 10px;">|</span> 
+                    <i class="fa-solid fa-network-wired"></i> 延迟: 12ms
+                </div>
+                <div style="display: flex; align-items: center; gap: 20px;">
+                    <div style="text-align: right;">
+                        <div style="font-size: 0.7rem; color: var(--text-muted);">距离最终审判日 (答辩)</div>
+                        <div class="doomsday-clock" id="countdown">00:00:00:00</div>
+                    </div>
+                    <i class="fa-regular fa-bell" style="font-size: 1.2rem; color: var(--neon-blue); cursor: pointer;"></i>
+                </div>
+            </header>
+
+            <!-- 动态内容区 -->
+            <div id="content-area" class="content-grid">
+                <!-- 页面内容通过 JS 注入 -->
+            </div>
+        </main>
+    </div>
+
+    <script>
+        /* ============================================================
+           数据模拟中心 (The Matrix) - 可以在这里修改“数据库”
+           ============================================================ */
+        const DB = {
+            users: [
+                { id: 1, role: 'student', username: 'student', name: '李华 (特工)', class: '计科1901', project: null },
+                { id: 2, role: 'teacher', username: 'teacher', name: '张教授 (指挥官)', department: '人工智能所' },
+                { id: 3, role: 'admin', username: 'admin', name: '中央处理器', department: '教务处' }
+            ],
+            topics: [ // 课题列表 (任务清单)
+                { id: 101, title: '基于神经网络的火星地表识别', teacher: '张教授', difficulty: 'S级', status: 'open', desc: '使用 CNN 分析探测器回传图像。' },
+                { id: 102, title: '量子加密通信协议前端实现', teacher: '王博士', difficulty: 'A级', status: 'full', desc: 'Vue3 + WebGL 实现量子态可视化。' },
+                { id: 103, title: '低轨道卫星群自动避障算法', teacher: '张教授', difficulty: 'S级', status: 'open', desc: '涉及复杂的 3D 向量计算。' },
+                { id: 104, title: '校园外卖派送无人机路径规划', teacher: '赵讲师', difficulty: 'B级', status: 'open', desc: 'A* 算法在二维地图的应用。' }
+            ],
+            myProject: { // 模拟学生当前进度
+                title: '基于神经网络的火星地表识别',
+                stage: 2, // 0:未选, 1:开题, 2:中期, 3:论文, 4:答辩
+                tasks: [
+                    { name: '文献综述上传', status: 'done', date: '2023-10-01' },
+                    { name: '外文翻译 (核心机密)', status: 'done', date: '2023-10-15' },
+                    { name: '开题报告 (第一防线)', status: 'done', date: '2023-11-01' },
+                    { name: '中期检查 (系统自检)', status: 'process', date: '2024-03-01' },
+                    { name: '论文查重 (排异反应)', status: 'pending', date: '2024-05-01' },
+                    { name: '最终答辩 (末日审判)', status: 'pending', date: '2024-06-01' }
+                ]
+            },
+            logs: [
+                { time: '10:00', msg: '系统核心启动...' },
+                { time: '10:05', msg: '检测到新的公告：答辩时间推迟。' },
+                { time: '11:30', msg: '张教授 上传了新的任务指令。' }
+            ]
+        };
+
+        /* ============================================================
+           应用程序逻辑 (Application Logic)
+           ============================================================ */
+        const App = {
+            currentUser: null,
+            charts: [], // 存储图表实例
+
+            // 初始化
+            init: function() {
+                this.startCountdown();
+                // 监听回车登录
+                document.addEventListener('keydown', (e) => {
+                    if(e.key === 'Enter' && !this.currentUser) this.login();
+                });
+            },
+
+            // 1. 登录逻辑
+            login: function() {
+                const userIn = document.getElementById('login-id').value;
+                const pwdIn = document.getElementById('login-pwd').value;
+                const btn = document.querySelector('.login-box .btn-cyber');
+
+                // 视觉特效：模拟破解过程
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 正在解密身份令牌...';
+                
+                setTimeout(() => {
+                    const user = DB.users.find(u => u.username === userIn);
+                    if(user && pwdIn === '123456') { // 默认密码
+                        this.currentUser = user;
+                        this.enterSystem();
+                    } else {
+                        this.showToast('访问拒绝：凭证无效或已过期', 'error');
+                        btn.innerHTML = '<i class="fa-solid fa-fingerprint"></i> 建立神经连接';
+                    }
+                }, 1000);
+            },
+
+            enterSystem: function() {
+                document.getElementById('login-layer').style.display = 'none';
+                document.getElementById('app-layer').style.display = 'flex';
+                
+                // 设置用户信息
+                document.getElementById('user-name-display').innerText = this.currentUser.name;
+                document.getElementById('user-role-display').innerText = `权限等级: ${this.currentUser.role.toUpperCase()}`;
+
+                this.renderMenu();
+                this.navigate('dashboard'); // 默认进仪表盘
+                this.showToast(`欢迎回来，指挥官 ${this.currentUser.name}`, 'success');
+            },
+
+            logout: function() {
+                location.reload(); // 简单粗暴的重启
+            },
+
+            // 2. 导航系统
+            renderMenu: function() {
+                const container = document.getElementById('nav-container');
+                container.innerHTML = '';
+                
+                let menus = [];
+                // 通用菜单
+                menus.push({ id: 'dashboard', icon: 'fa-chart-line', label: '中央控制台' });
+                
+                if (this.currentUser.role === 'student') {
+                    menus.push({ id: 'market', icon: 'fa-magnifying-glass-location', label: '课题猎场' });
+                    menus.push({ id: 'project', icon: 'fa-code-branch', label: '研发进度' });
+                    menus.push({ id: 'doc', icon: 'fa-file-shield', label: '机密文档' });
+                } else if (this.currentUser.role === 'teacher') {
+                    menus.push({ id: 'my-students', icon: 'fa-users-viewfinder', label: '学员监控' });
+                    menus.push({ id: 'publish', icon: 'fa-satellite-dish', label: '发布任务' });
+                }
+
+                menus.forEach(m => {
+                    const div = document.createElement('div');
+                    div.className = 'nav-item';
+                    div.id = `nav-${m.id}`;
+                    div.innerHTML = `<i class="${m.icon}" style="width:20px;"></i> ${m.label}`;
+                    div.onclick = () => this.navigate(m.id);
+                    container.appendChild(div);
+                });
+            },
+
+            navigate: function(pageId) {
+                // 更新菜单高亮
+                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+                const active = document.getElementById(`nav-${pageId}`);
+                if(active) active.classList.add('active');
+
+                const content = document.getElementById('content-area');
+                content.innerHTML = ''; // 清空
+                this.charts.forEach(c => c.destroy()); // 销毁旧图表
+                
+                // 简单的淡入效果
+                content.style.opacity = 0;
+                setTimeout(() => {
+                    switch(pageId) {
+                        case 'dashboard': this.renderDashboard(content); break;
+                        case 'market': this.renderMarket(content); break;
+                        case 'project': this.renderProject(content); break;
+                        case 'doc': this.renderDocs(content); break;
+                        default: content.innerHTML = `<h2>功能模块 [${pageId}] 正在开发中...</h2>`;
+                    }
+                    content.style.opacity = 1;
+                }, 200);
+            },
+
+            /* ================= 页面渲染逻辑 ================= */
+
+            // A. 仪表盘 (Dashboard)
+            renderDashboard: function(container) {
+                container.innerHTML = `
+                    <div class="section-title"><span>SYSTEM</span> // 态势感知仪表盘</div>
+                    
+                    <!-- 顶部数据卡片 -->
+                    <div class="dashboard-widgets">
+                        <div class="widget-card panel-glass">
+                            <div class="widget-label">距离截稿 (天)</div>
+                            <div class="widget-val" style="color:var(--neon-red)">14</div>
+                            <div style="height:2px; width:100%; background:#333;"><div style="width:80%; height:100%; background:var(--neon-red); box-shadow:0 0 10px var(--neon-red);"></div></div>
+                        </div>
+                        <div class="widget-card panel-glass">
+                            <div class="widget-label">当前版本号</div>
+                            <div class="widget-val" style="color:var(--neon-blue)">v4.2.0</div>
+                            <div style="font-size:0.8rem; color:#666;">Hash: a1b2c3d4</div>
+                        </div>
+                        <div class="widget-card panel-glass">
+                            <div class="widget-label">查重率 (预估)</div>
+                            <div class="widget-val" style="color:var(--neon-green)">8.5%</div>
+                            <div style="font-size:0.8rem; color:#666;">状态: 安全</div>
+                        </div>
+                        <div class="widget-card panel-glass">
+                            <div class="widget-label">导师怒气值</div>
+                            <div class="widget-val" style="color:var(--neon-purple)">20%</div>
+                            <div style="font-size:0.8rem; color:#666;">状态: 情绪稳定</div>
+                        </div>
+                    </div>
+
+                    <!-- 图表区 -->
+                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px;">
+                        <div class="panel-glass" style="padding: 20px;">
+                            <h4 style="margin-bottom: 15px; color: var(--neon-blue);"><i class="fa-solid fa-wave-square"></i> 代码提交频率 / 文献阅读量</h4>
+                            <canvas id="chart-activity" height="100"></canvas>
+                        </div>
+                        <div class="panel-glass" style="padding: 20px;">
+                            <h4 style="margin-bottom: 15px; color: var(--neon-blue);"><i class="fa-solid fa-pie-chart"></i> 任务完成分布</h4>
+                            <canvas id="chart-tasks" height="200"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- 系统日志 -->
+                    <div class="panel-glass" style="margin-top: 20px; padding: 20px;">
+                        <h4 style="margin-bottom: 10px; color: var(--text-muted);">SYSTEM_LOGS (最新指令)</h4>
+                        <div style="font-family: monospace; font-size: 0.9rem; line-height: 1.6;">
+                            ${DB.logs.map(log => `<div><span style="color:var(--neon-blue)">[${log.time}]</span> ${log.msg}</div>`).join('')}
+                        </div>
+                    </div>
+                `;
+
+                // 初始化图表
+                this.initCharts();
+            },
+
+            initCharts: function() {
+                // 折线图
+                const ctx1 = document.getElementById('chart-activity').getContext('2d');
+                this.charts.push(new Chart(ctx1, {
+                    type: 'line',
+                    data: {
+                        labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+                        datasets: [{
+                            label: '脑细胞活跃度',
+                            data: [10, 50, 20, 80, 35, 90, 100],
+                            borderColor: '#00f3ff',
+                            backgroundColor: 'rgba(0, 243, 255, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: { x: { grid: { color: '#333' } }, y: { grid: { color: '#333' } } }
+                    }
+                }));
+
+                // 雷达图
+                const ctx2 = document.getElementById('chart-tasks').getContext('2d');
+                this.charts.push(new Chart(ctx2, {
+                    type: 'radar',
+                    data: {
+                        labels: ['代码', '文档', '摸鱼', '答辩', '排版'],
+                        datasets: [{
+                            label: '能力值',
+                            data: [90, 40, 100, 60, 20],
+                            backgroundColor: 'rgba(188, 19, 254, 0.2)',
+                            borderColor: '#bc13fe',
+                        }]
+                    },
+                    options: { scales: { r: { grid: { color: '#333' }, angleLines: { color: '#333' } } } }
+                }));
+            },
+
+            // B. 课题猎场 (Topic Market)
+            renderMarket: function(container) {
+                container.innerHTML = `<div class="section-title"><span>MISSION</span> // 课题赏金猎场</div><div class="dashboard-widgets" style="grid-template-columns: repeat(3, 1fr);" id="topic-grid"></div>`;
+                const grid = document.getElementById('topic-grid');
+
+                DB.topics.forEach(t => {
+                    const isFull = t.status === 'full';
+                    const card = document.createElement('div');
+                    card.className = 'widget-card panel-glass';
+                    card.style.borderTop = `3px solid ${isFull ? 'var(--neon-red)' : 'var(--neon-green)'}`;
+                    card.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                            <span class="status-badge ${isFull ? 'st-red' : 'st-green'}">${isFull ? '人员满载' : '接受报名'}</span>
+                            <span style="color:var(--neon-gold); font-weight:bold;">${t.difficulty}</span>
+                        </div>
+                        <h3 style="color:white; margin-bottom:10px;">${t.title}</h3>
+                        <p style="color:var(--text-muted); font-size:0.85rem; height:40px;">${t.desc}</p>
+                        <div style="margin-top:20px; display:flex; align-items:center; justify-content:space-between;">
+                            <span style="font-size:0.8rem; color:var(--neon-blue);"><i class="fa-solid fa-user-astronaut"></i> ${t.teacher}</span>
+                            <button class="btn-cyber ${isFull ? 'danger' : ''}" onclick="App.showToast('${isFull?'名额已满，无法接入':'申请指令已发送至导师终端'}', '${isFull?'error':'success'}')">
+                                ${isFull ? 'LOCKED' : '执行任务'}
+                            </button>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            },
+
+            // C. 研发进度 (Project Timeline)
+            renderProject: function(container) {
+                const p = DB.myProject;
+                container.innerHTML = `
+                    <div class="section-title"><span>TIMELINE</span> // 核心研发链路</div>
+                    
+                    <div class="panel-glass" style="padding:30px;">
+                        <h2 style="color:var(--neon-blue); margin-bottom:5px;">${p.title}</h2>
+                        <p style="color:var(--text-muted); margin-bottom:30px;">当前研发阶段: Phase ${p.stage} - 系统自检中</p>
+                        
+                        <!-- 进度条 -->
+                        <div style="display:flex; justify-content:space-between; position:relative; margin-bottom:50px;">
+                            <div style="position:absolute; top:15px; left:0; width:100%; height:2px; background:#333; z-index:0;"></div>
+                            ${p.tasks.map((task, index) => {
+                                let color = '#333';
+                                let icon = 'fa-circle';
+                                if(task.status === 'done') { color = 'var(--neon-green)'; icon = 'fa-circle-check'; }
+                                else if(task.status === 'process') { color = 'var(--neon-blue)'; icon = 'fa-spinner fa-spin'; }
+                                else if(task.status === 'pending') { color = 'var(--text-muted)'; }
+
+                                return `
+                                    <div style="z-index:1; text-align:center; flex:1;">
+                                        <div style="width:30px; height:30px; background:var(--bg-void); border:2px solid ${color}; border-radius:50%; margin:0 auto 10px; display:flex; align-items:center; justify-content:center; color:${color};">
+                                            <i class="fa-solid ${icon}"></i>
+                                        </div>
+                                        <div style="font-size:0.85rem; color:${color==='var(--text-muted)'?'#666':'white'}; font-weight:bold;">${task.name}</div>
+                                        <div style="font-size:0.7rem; color:#666;">${task.date}</div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+
+                        <!-- 交互区 -->
+                        <div style="border-top:1px solid rgba(255,255,255,0.1); padding-top:20px; display:flex; justify-content:flex-end; gap:15px;">
+                             <button class="btn-cyber" onclick="App.showToast('正在向云端同步本地代码库...')"><i class="fa-brands fa-github"></i> 同步 Git 仓库</button>
+                             <button class="btn-cyber" onclick="App.showToast('开题报告已上传至加密服务器', 'success')"><i class="fa-solid fa-upload"></i> 上传阶段成果</button>
+                        </div>
+                    </div>
+                `;
+            },
+            
+            // D. 机密文档 (Docs)
+            renderDocs: function(container) {
+                container.innerHTML = `
+                     <div class="section-title"><span>ARCHIVE</span> // 机密文档库</div>
+                     <div class="panel-glass" style="padding:20px;">
+                        <table style="width:100%; border-collapse:collapse; color:var(--text-main);">
+                            <thead>
+                                <tr style="border-bottom:1px solid var(--neon-blue); text-align:left;">
+                                    <th style="padding:15px;">文档类型</th>
+                                    <th>文件名</th>
+                                    <th>密级</th>
+                                    <th>状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td style="padding:15px;"><i class="fa-solid fa-file-word"></i> 任务书</td>
+                                    <td>2024_Task_Specification.docx</td>
+                                    <td style="color:var(--neon-green)">公开</td>
+                                    <td><span class="status-badge st-green">已归档</span></td>
+                                    <td><button class="btn-cyber" style="padding:5px 10px; font-size:0.7rem;">下载</button></td>
+                                </tr>
+                                <tr style="background:rgba(255,255,255,0.02);">
+                                    <td style="padding:15px;"><i class="fa-solid fa-file-pdf"></i> 开题报告</td>
+                                    <td>Proposal_Final_v3_打死不改版.pdf</td>
+                                    <td style="color:var(--neon-purple)">机密</td>
+                                    <td><span class="status-badge st-blue">审核中</span></td>
+                                    <td><button class="btn-cyber" style="padding:5px 10px; font-size:0.7rem;">预览</button></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                     </div>
+                `;
+            },
+
+            /* ================= 工具函数 ================= */
+            
+            // 显示 Toast 提示
+            showToast: function(msg, type = 'success') {
+                const container = document.getElementById('toast-container');
+                const div = document.createElement('div');
+                div.className = 'toast-msg';
+                const color = type === 'success' ? 'var(--neon-green)' : (type === 'error' ? 'var(--neon-red)' : 'var(--neon-blue)');
+                div.style.borderColor = color;
+                div.style.color = color;
+                
+                div.innerHTML = `
+                    <i class="fa-solid ${type==='success'?'fa-check-circle':'fa-triangle-exclamation'}"></i>
+                    <span>${msg}</span>
+                `;
+                container.appendChild(div);
+                setTimeout(() => div.remove(), 3000);
+            },
+
+            // 倒计时逻辑
+            startCountdown: function() {
+                const el = document.getElementById('countdown');
+                // 模拟一个未来的日期
+                const targetDate = new Date();
+                targetDate.setDate(targetDate.getDate() + 14); // 14天后
+                
+                setInterval(() => {
+                    const now = new Date().getTime();
+                    const distance = targetDate - now;
+                    
+                    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+                    
+                    // 补零
+                    const d = days < 10 ? "0"+days : days;
+                    const h = hours < 10 ? "0"+hours : hours;
+                    const m = minutes < 10 ? "0"+minutes : minutes;
+                    const s = seconds < 10 ? "0"+seconds : seconds;
+                    
+                    el.innerText = `${d}:${h}:${m}:${s}`;
+                }, 1000);
+            }
+        };
+
+        // 启动应用
+        window.onload = () => App.init();
+
+    </script>
+</body>
+</html>
